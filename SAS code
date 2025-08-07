@@ -1,0 +1,213 @@
+*============== Importing data ==============;
+libname paper "...path";
+run;
+filename refile '...path/SENEGAL_DATA_20.csv';
+proc import datafile = refile
+	dbms=CSV
+	out=WORK.sen;
+	getnames=YES;
+run;
+
+*============== Data formatting ==============;
+data sen1; 
+set sen;
+*---------------- Outcome ----------------;
+* CR5 Have you ever tried or experimented with cigarette smoking, even one or two puffs?;
+if CR5 = 1 then smoking = "Yes";
+else if CR5 = 2 then smoking = "No";
+else smoking = ""; * Missing values;
+
+*---------------- Exposure ----------------;
+** Parent_smoke for logistic regression model;
+if OR45 = 1 then parent_smoke = "None";
+else if OR45 in (2,3,4) then parent_smoke = "Any"; *At least one parent smokes;
+else if OR45 = 5 then parent_smoke = ""; * responded "Don't know";
+else parent_smoke = ""; * Missing values;
+
+*---------------- Other covariates ----------------;
+* CR2 sex;
+if CR2 = 1 then sex = "M";
+else if CR2 = 2 then sex = "F";
+else sex = ""; * Missing values;
+
+* Grade;
+if SNR3 = 1 then grade = "6th grade";
+else if SNR3 = 2 then grade = "7th grade";
+else if SNR3 = 3 then grade = "8th grade";
+else if SNR3 = 4 then grade = "9th grade";
+else grade = ""; * Missing values;
+
+* SNR4 During an average week, how much money do you have that you 
+can spend on yourself, however you want?; 
+if SNR4 = 1 then money = "Usually no money";
+else if SNR4 = 2 then money = "Less than $4.38 CFA";
+else if SNR4 => 3 then money = "At least $4.38 CFA"; 
+else money = ""; * Missing values;
+
+* OR1 parent_work;
+if OR1 in (1,2,3) then parent_work = "Yes"; * at least one working parent;
+else if OR1 = 4 then parent_work = "No";
+else if OR1 = 5 then parent_work = "";
+else parent_work = ""; * Missing values;
+
+* OR46 friends_smoke;
+if OR46 = 1 then friends_smoke = "None";
+else if OR46 in (2, 3, 4) then friends_smoke = "Any"; *Some friends to all friends;
+else friends_smoke = "";  * Missing values;
+
+rename 
+  FinalWgt = weight;
+  
+label
+  smoking = "Student smoking behavior"
+  parent_smoke = "Parent smoking behavior"
+  sex = "Student sex"
+  grade = "Grade"
+  money = "Pocket money per week"
+  parent_work = "Parent work status"
+  friends_smoke = "Friends smoking behavior"
+  ;
+run;
+
+* checking new variables against old variables for correctness;
+proc freq data = sen1;
+table CR5 smoking 
+      OR45 parent_smoke  
+      CR2 sex
+      SNR3 grade
+      SNR4 money 
+      OR1  parent_work  
+      OR46 friends_smoke    
+      ;
+run;
+      
+*============== Table 1 ==============;
+* Computing all levels of parental smoking status (None, Father only
+Mother only, Both) accross variables of interest;
+
+proc surveyfreq data=sen1;
+tables smoking*parent_smoke
+       sex*parent_smoke
+       grade*parent_smoke
+       money*parent_smoke
+       parent_work*parent_smoke
+       friends_smoke*parent_smoke
+             
+       / col chisq;
+strata Stratum;
+cluster PSU;
+weight weight;
+run;
+
+*================== Table 2: Logistic regression ===============;
+*1. crude association between smoking and selected covariates; 
+*1.a parent smoking behavior at least one;
+proc surveylogistic data = sen1;
+   strata Stratum;
+   cluster PSU;
+   weight weight;
+   class parent_smoke(ref= "None")/ param=ref; 
+   model smoking(event='Yes') = parent_smoke;
+run;
+
+*1.b sex;
+proc surveylogistic data = sen1;
+   strata Stratum;
+   cluster PSU;
+   weight weight;
+   class sex(ref = "F")/ param=ref; 
+   model smoking(event='Yes') = sex;
+run;
+
+*1.c grade;
+proc surveylogistic data = sen1;
+   strata Stratum;
+   cluster PSU;
+   weight weight;
+   class grade(ref= "6th grade")/ param=ref; 
+   model smoking(event='Yes') = grade;
+run;
+
+*1.d pocket money;
+proc surveylogistic data = sen1;
+   strata Stratum;
+   cluster PSU;
+   weight weight;
+   class money(ref= "Usually no money")/ param=ref; 
+   model smoking(event='Yes') = money;
+run;
+
+*1.e Parent Work Status;
+proc surveylogistic data = sen1;
+   strata Stratum;
+   cluster PSU;
+   weight weight;
+   class parent_work(ref= "No")/ param=ref; 
+   model smoking(event='Yes') = parent_work;
+run;
+
+*1.f Friends smoking;
+proc surveylogistic data = sen1;
+   strata Stratum;
+   cluster PSU;
+   weight weight;
+   class friends_smoke(ref= "None")/ param=ref; 
+   model smoking(event='Yes') = friends_smoke;
+run;
+
+*2. adjusted model with selected covariates; 
+proc surveylogistic data = sen1;
+   strata Stratum;
+   cluster PSU;
+   weight weight;
+   class parent_smoke(ref= "None") 
+         sex(ref= "F")  
+         grade(ref= "6th grade")
+         money(ref= "Usually no money") 
+         parent_work(ref= "No") 
+         friends_smoke(ref= "None")/ param=ref;
+   model smoking(event='Yes') = parent_smoke sex grade money parent_work friends_smoke;
+run;
+
+*3. Assessing effect measure modification on the multiplicative scale; 
+* Interaction with sex;
+proc surveylogistic data = sen1;
+   strata Stratum;
+   cluster PSU;
+   weight weight;
+   class parent_smoke(ref= "None") 
+         sex(ref= "F") 
+         grade(ref= "6th grade")
+         money(ref= "Usually no money") 
+         parent_work(ref= "No") 
+         friends_smoke(ref= "None")/ param=ref;
+   model smoking(event='Yes') = parent_smoke sex grade money parent_work friends_smoke parent_smoke*sex;
+run;
+
+* Interaction with money;
+proc surveylogistic data = sen1;
+   strata Stratum;
+   cluster PSU;
+   weight weight;
+   class parent_smoke(ref= "None") 
+         sex(ref= "F") 
+         grade(ref= "6th grade")
+         money(ref= "Usually no money") 
+         parent_work(ref= "No") 
+         friends_smoke(ref= "None")/ param=ref;
+   model smoking(event='Yes') = parent_smoke sex grade money parent_work friends_smoke parent_smoke*money;
+run;
+
+* Interaction with friends smoking;
+proc surveylogistic data = sen1;
+   strata Stratum;
+   cluster PSU;
+   weight weight;
+   class parent_smoke(ref= "None") 
+         sex(ref= "F") 
+         grade(ref= "6th grade")
+         money(ref= "Usually no money") 
+         parent_work(ref= "No") 
+         friends_smoke(ref= "None")/ param=ref;
+   model smoking(event='Yes') = parent_smoke sex grade money parent_work friends_smoke parent_smoke*friends_smoke;
+run;
